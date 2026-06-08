@@ -71,6 +71,15 @@ class Database:
                     "INSERT INTO matches (team1, team2, stage, stage_name, stake, match_date) VALUES (?,?,?,?,?,?)",
                     (m['team1'], m['team2'], m['stage'], m['stage_name'], m['stake'], m['date'])
                 )
+    def reset_and_reseed_matches(self):
+        with self.conn() as c:
+            c.execute("DELETE FROM bets")
+            c.execute("DELETE FROM matches")
+            for m in WC2026_MATCHES:
+                c.execute(
+                    "INSERT INTO matches (team1, team2, stage, stage_name, stake, match_date) VALUES (?,?,?,?,?,?)",
+                    (m['team1'], m['team2'], m['stage'], m['stage_name'], m['stake'], m['date'])
+                )
 
     def register_user(self, user_id, name, username):
         with self.conn() as c:
@@ -150,6 +159,27 @@ class Database:
         with self.conn() as c:
             row = c.execute("SELECT COUNT(*) as cnt FROM bets WHERE match_id=?", (match_id,)).fetchone()
             return row['cnt'] if row else 0
+
+    def get_matches_with_bet_stats(self):
+        with self.conn() as c:
+            matches = c.execute(
+                "SELECT * FROM matches ORDER BY id"
+            ).fetchall()
+            result = []
+            for m in matches:
+                bets = c.execute(
+                    "SELECT bet1, bet2, COUNT(*) as cnt FROM bets WHERE match_id=? GROUP BY bet1, bet2 ORDER BY cnt DESC",
+                    (m['id'],)
+                ).fetchall()
+                total = sum(b['cnt'] for b in bets)
+                if total == 0:
+                    continue
+                dist = [(f"{b['bet1']}:{b['bet2']}", b['cnt']) for b in bets]
+                d = dict(m)
+                d['bet_count'] = total
+                d['bet_distribution'] = dist
+                result.append(d)
+            return result
 
     def get_matches_pending_result(self):
         with self.conn() as c:
