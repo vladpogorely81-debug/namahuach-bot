@@ -373,9 +373,9 @@ async def show_admin_menu(msg: Message, edit=False):
 
     text = (
         f"🔧 <b>Панель адміна</b>\n\n"
-        f"👥 Учасників: {users_count}\n"
-        f"🏦 Банк: {bank} грн\n"
-        f"⏳ Матчів без результату: {len(pending)}\n"
+        f"👥 Учасників: <b>{users_count}</b>\n"
+        f"🏦 Банк: <b>{bank} грн</b>\n"
+        f"⏳ Матчів без результату: <b>{len(pending)}</b>\n"
     )
     buttons = [
         [InlineKeyboardButton(text="⚽ Ввести результат матчу", callback_data="admin_results")],
@@ -387,7 +387,10 @@ async def show_admin_menu(msg: Message, edit=False):
     ]
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
     if edit:
-        await msg.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+        try:
+            await msg.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+        except Exception:
+            await msg.answer(text, parse_mode="HTML", reply_markup=keyboard)
     else:
         await msg.answer(text, parse_mode="HTML", reply_markup=keyboard)
 
@@ -535,17 +538,29 @@ async def admin_confirm_result(callback: CallbackQuery, state: FSMContext):
         try:
             if r:
                 sign = "+" if r['delta'] > 0 else ""
-                emoji = "✅" if r['delta'] > 0 else ("↩️" if r['delta'] == 0 else "❌")
+                label = r['label']
+                if r['delta'] > 0:
+                    if 'х3' in label:
+                        mood = "😱 Нажаль ваша ставка зіграла, гроші ваші... та ще й утричі! Це взагалі законно?!"
+                    elif 'х2' in label:
+                        mood = "😔 Нажаль ваша ставка зіграла, гроші ваші. Удвічі. Сумно."
+                    else:
+                        mood = "🙁 Нажаль ваша ставка зіграла, гроші ваші."
+                elif r['delta'] == 0:
+                    mood = "🤝 Нічия — і ставка нічия. Повернення, так би мовити."
+                else:
+                    mood = "🥳 Юху, ставка не зіграла, грошики мої!"
                 personal = (
                     f"🏁 <b>{match['team1']} — {match['team2']}</b>: {s1}:{s2}\n\n"
                     f"Твій прогноз: <b>{r['bet1']}:{r['bet2']}</b>\n"
-                    f"{emoji} Результат: <b>{sign}{r['delta']} грн</b>\n\n"
+                    f"Результат: <b>{sign}{r['delta']} грн</b>\n\n"
+                    f"{mood}\n\n"
                     f"💰 Баланс: /balance"
                 )
             else:
                 personal = (
                     f"🏁 <b>{match['team1']} — {match['team2']}</b>: {s1}:{s2}\n"
-                    f"⚪ Ти не ставив на цей матч"
+                    f"⚪ Ти не ставив на цей матч. Наступного разу не пропусти!"
                 )
             await bot.send_message(uid, personal, parse_mode="HTML")
         except Exception:
@@ -737,6 +752,7 @@ async def admin_standings(callback: CallbackQuery):
         await callback.answer("⛔")
         return
     rows = db.get_standings()
+    bank = db.get_bank_total()
     if not rows:
         text = "Поки що немає даних"
     else:
@@ -745,12 +761,13 @@ async def admin_standings(callback: CallbackQuery):
         for i, r in enumerate(rows):
             medal = medals[i] if i < 3 else f"{i+1}."
             sign = "+" if r['balance'] >= 0 else ""
-            text += f"{medal} <b>{r['name']}</b> — {sign}{r['balance']} грн ({r['total_bets']} ст.)\n"
-        text += f"\n🏦 Банк: {db.get_bank_total()} грн"
-    await callback.message.edit_text(
+            champ_str = f" 🏆{r['champ_team']}" if r.get('champ_team') else ""
+            text += f"{medal} <b>{r['name']}</b>{champ_str} — {sign}{r['balance']} грн ({r['total_bets']} ст.)\n"
+        text += f"\n🏦 <b>Загальний банк: {bank} грн</b>"
+    await callback.message.answer(
         text, parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_menu")
+            InlineKeyboardButton(text="⬅️ Назад до меню", callback_data="admin_menu")
         ]])
     )
     await callback.answer()
