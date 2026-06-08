@@ -62,6 +62,7 @@ async def cmd_start(msg: Message):
         f"🏆 /champion — ставка на чемпіона\n"
         f"💰 /balance — мій баланс\n"
         f"📊 /standings — таблиця учасників\n"
+        f"📈 /bets_stat — хто на що поставив\n"
         f"📋 /history — моя історія ставок\n"
         f"📖 /rules — правила\n",
         parse_mode="HTML"
@@ -316,17 +317,38 @@ async def cmd_balance(msg: Message):
 async def cmd_standings(msg: Message):
     rows = db.get_standings()
     if not rows:
-        await msg.answer("Поки що немає даних")
+        await msg.answer("Поки що немає учасників")
         return
     text = "📊 <b>Таблиця учасників</b>\n\n"
     medals = ["🥇", "🥈", "🥉"]
     for i, r in enumerate(rows):
         medal = medals[i] if i < 3 else f"{i+1}."
-        sign = "+" if r['balance'] >= 0 else ""
+        balance = r['balance'] or 0
+        sign = "+" if balance >= 0 else ""
         champ_str = f" 🏆{r['champ_team']}" if r.get('champ_team') else ""
-        text += f"{medal} <b>{r['name']}</b>{champ_str} — {sign}{r['balance']} грн ({r['total_bets']} ст.)\n"
+        text += f"{medal} <b>{r['name']}</b>{champ_str} — {sign}{balance} грн ({r['total_bets'] or 0} ст.)\n"
     total_bank = db.get_bank_total()
     text += f"\n🏦 <b>Загальний банк: {total_bank} грн</b>"
+    await msg.answer(text, parse_mode="HTML")
+
+@router.message(Command("bets_stat"))
+async def cmd_bets_stat(msg: Message):
+    matches = db.get_matches_with_bet_stats()
+    if not matches:
+        await msg.answer("Ще немає ставок")
+        return
+    text = "🎯 <b>Статистика ставок по матчах</b>\n\n"
+    for m in matches[:15]:
+        if not m['bet_count']:
+            continue
+        text += f"<b>{m['team1']} — {m['team2']}</b> ({m['stage_name']})\n"
+        if m['score1'] is not None:
+            text += f"  🏁 Результат: {m['score1']}:{m['score2']}\n"
+        text += f"  👥 Поставили: {m['bet_count']} осіб\n"
+        for bet_str, cnt in (m['bet_distribution'] or []):
+            bar = "▓" * cnt + "░" * (m['bet_count'] - cnt)
+            text += f"  {bet_str} — {cnt} чол. {bar}\n"
+        text += "\n"
     await msg.answer(text, parse_mode="HTML")
 
 @router.message(Command("history"))
@@ -801,6 +823,14 @@ async def cmd_broadcast(msg: Message):
         except Exception:
             failed += 1
     await msg.answer(f"✅ Відправлено: {sent}, не вдалось: {failed}")
+
+@router.message(Command("reset_matches"))
+async def cmd_reset_matches(msg: Message):
+    if not is_admin(msg.from_user.id):
+        await msg.answer("⛔ Тільки для адміна")
+        return
+    db.reset_and_reseed_matches()
+    await msg.answer("✅ Матчі перезавантажені з правильного розкладу!\n\nТепер /calendar покаже всі 72 матчі по хронології.")
 
 @router.message(Command("bank"))
 async def cmd_bank(msg: Message):
