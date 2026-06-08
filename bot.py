@@ -1,7 +1,7 @@
 import logging
 import os
 from aiogram import Bot, Dispatcher, Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -39,6 +39,18 @@ class AdminStates(StatesGroup):
 def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
 
+def main_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📅 Календар"), KeyboardButton(text="🎯 Зробити ставку")],
+            [KeyboardButton(text="🏆 Ставка на чемпіона"), KeyboardButton(text="📈 Хто на що ставить")],
+            [KeyboardButton(text="💰 Мій баланс"), KeyboardButton(text="📊 Таблиця")],
+            [KeyboardButton(text="📋 Моя історія"), KeyboardButton(text="📖 Правила")],
+        ],
+        resize_keyboard=True,
+        persistent=True
+    )
+
 async def notify_admins(text: str):
     for admin_id in ADMIN_IDS:
         try:
@@ -56,20 +68,20 @@ async def cmd_start(msg: Message):
         await msg.answer_photo(FSInputFile(photo_path))
     await msg.answer(
         f"Вас вітає Лєвчік, у вузьких кругах — Старий, у ще вужчих — Старий Намахувач 🎲\n\n"
-        f"<b>Команди:</b>\n"
-        f"📅 /calendar — календар матчів\n"
-        f"🎯 /bet — зробити ставку на матч\n"
-        f"🏆 /champion — ставка на чемпіона\n"
-        f"💰 /balance — мій баланс\n"
-        f"📊 /standings — таблиця учасників\n"
-        f"📈 /bets_stat — хто на що поставив\n"
-        f"📋 /history — моя історія ставок\n"
-        f"📖 /rules — правила\n",
-        parse_mode="HTML"
+        f"Вибирай що тебе цікавить 👇",
+        parse_mode="HTML",
+        reply_markup=main_keyboard()
     )
 
 @router.message(Command("rules"))
 async def cmd_rules(msg: Message):
+    await send_rules(msg)
+
+@router.message(F.text == "📖 Правила")
+async def btn_rules(msg: Message):
+    await send_rules(msg)
+
+async def send_rules(msg: Message):
     await msg.answer(
         "📖 <b>Правила ставок</b>\n\n"
         "❌ <b>Не вгадав результат</b> — все в банк\n"
@@ -84,6 +96,34 @@ async def cmd_rules(msg: Message):
         "Команда: /champion",
         parse_mode="HTML"
     )
+
+@router.message(F.text == "📅 Календар")
+async def btn_calendar(msg: Message):
+    await show_calendar(msg, offset=0)
+
+@router.message(F.text == "🎯 Зробити ставку")
+async def btn_bet(msg: Message, state: FSMContext):
+    await cmd_bet(msg)
+
+@router.message(F.text == "🏆 Ставка на чемпіона")
+async def btn_champion(msg: Message, state: FSMContext):
+    await cmd_champion(msg, state)
+
+@router.message(F.text == "📈 Хто на що ставить")
+async def btn_bets_stat(msg: Message):
+    await cmd_bets_stat(msg)
+
+@router.message(F.text == "💰 Мій баланс")
+async def btn_balance(msg: Message):
+    await cmd_balance(msg)
+
+@router.message(F.text == "📊 Таблиця")
+async def btn_standings(msg: Message):
+    await cmd_standings(msg)
+
+@router.message(F.text == "📋 Моя історія")
+async def btn_history(msg: Message):
+    await cmd_history(msg)
 
 # ─── CALENDAR ────────────────────────────────────────────────────────────────
 
@@ -316,19 +356,23 @@ async def cmd_balance(msg: Message):
 @router.message(Command("standings"))
 async def cmd_standings(msg: Message):
     rows = db.get_standings()
-    if not rows:
-        await msg.answer("Поки що немає учасників")
-        return
     text = "📊 <b>Таблиця учасників</b>\n\n"
-    medals = ["🥇", "🥈", "🥉"]
-    for i, r in enumerate(rows):
-        medal = medals[i] if i < 3 else f"{i+1}."
-        balance = r['balance'] or 0
-        sign = "+" if balance >= 0 else ""
-        champ_str = f" 🏆{r['champ_team']}" if r.get('champ_team') else ""
-        text += f"{medal} <b>{r['name']}</b>{champ_str} — {sign}{balance} грн ({r['total_bets'] or 0} ст.)\n"
-    total_bank = db.get_bank_total()
-    text += f"\n🏦 <b>Загальний банк: {total_bank} грн</b>"
+    if not rows:
+        text += "Поки що ніхто не зареєструвався 😔\nПоділись ботом з друзями!"
+    else:
+        medals = ["🥇", "🥈", "🥉"]
+        for i, r in enumerate(rows):
+            try:
+                medal = medals[i] if i < 3 else f"{i+1}."
+                balance = int(r['balance'] or 0)
+                total_bets = int(r['total_bets'] or 0)
+                sign = "+" if balance >= 0 else ""
+                champ_str = f" 🏆{r['champ_team']}" if r.get('champ_team') else ""
+                text += f"{medal} <b>{r['name']}</b>{champ_str} — {sign}{balance} грн ({total_bets} ст.)\n"
+            except Exception:
+                continue
+        total_bank = db.get_bank_total()
+        text += f"\n🏦 <b>Загальний банк: {total_bank} грн</b>"
     await msg.answer(text, parse_mode="HTML")
 
 @router.message(Command("bets_stat"))
@@ -775,16 +819,21 @@ async def admin_standings(callback: CallbackQuery):
         return
     rows = db.get_standings()
     bank = db.get_bank_total()
+    text = "📊 <b>Таблиця учасників</b>\n\n"
     if not rows:
-        text = "Поки що немає даних"
+        text += "Поки що ніхто не зареєструвався 😔"
     else:
-        text = "📊 <b>Таблиця учасників</b>\n\n"
         medals = ["🥇", "🥈", "🥉"]
         for i, r in enumerate(rows):
-            medal = medals[i] if i < 3 else f"{i+1}."
-            sign = "+" if r['balance'] >= 0 else ""
-            champ_str = f" 🏆{r['champ_team']}" if r.get('champ_team') else ""
-            text += f"{medal} <b>{r['name']}</b>{champ_str} — {sign}{r['balance']} грн ({r['total_bets']} ст.)\n"
+            try:
+                medal = medals[i] if i < 3 else f"{i+1}."
+                balance = int(r['balance'] or 0)
+                total_bets = int(r['total_bets'] or 0)
+                sign = "+" if balance >= 0 else ""
+                champ_str = f" 🏆{r['champ_team']}" if r.get('champ_team') else ""
+                text += f"{medal} <b>{r['name']}</b>{champ_str} — {sign}{balance} грн ({total_bets} ст.)\n"
+            except Exception:
+                continue
         text += f"\n🏦 <b>Загальний банк: {bank} грн</b>"
     await callback.message.answer(
         text, parse_mode="HTML",
