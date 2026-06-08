@@ -1,10 +1,12 @@
 import sqlite3
+import os
 from scoring import calculate_result, STAGE_STAKES
 from matches_data import WC2026_MATCHES
 
 class Database:
     def __init__(self, path: str):
         self.path = path
+        os.makedirs(os.path.dirname(path), exist_ok=True)
 
     def conn(self):
         c = sqlite3.connect(self.path)
